@@ -1,0 +1,131 @@
+# Full local development stack.
+# Start with: `docker compose up -d --build`.
+# Production setups should split this file (compose override or k8s manifests).
+
+name: helpers-platform
+
+x-app: &app-common
+  build:
+    context: .
+    dockerfile: docker/app.Dockerfile
+  env_file: .env
+  environment:
+    POSTGRES_HOST: postgres
+    REDIS_URL: redis://redis:6379/0
+    RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-helpers}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-helpers}
+      POSTGRES_DB: ${POSTGRES_DB:-helpers}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-helpers} -d ${POSTGRES_DB:-helpers}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  admin-api:
+    <<: *app-common
+    command: ["admin-api"]
+    ports:
+      - "8000:8000"
+
+  wb-bot:
+    <<: *app-common
+    command: ["wb-bot"]
+
+  ozon-bot:
+    <<: *app-common
+    command: ["ozon-bot"]
+
+  task-bot:
+    <<: *app-common
+    command: ["task-planner-bot"]
+
+  network-bot:
+    <<: *app-common
+    command: ["network-bot"]
+
+  worker:
+    <<: *app-common
+    command: ["helpers-worker"]
+
+  beat:
+    <<: *app-common
+    command: ["helpers-beat"]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:

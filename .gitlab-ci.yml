@@ -1,0 +1,110 @@
+# GitLab CI/CD pipeline for Helpers Platform.
+#
+# Stages:
+#   lint       - ruff
+#   typecheck  - mypy strict
+#   test       - pytest + coverage
+#   build      - build & push Docker image
+#   deploy     - deploy to staging/production (manual)
+#
+# The pipeline is linear by stage. Jobs inside a stage run in parallel.
+
+stages:
+  - lint
+  - typecheck
+  - test
+  - build
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+  DOCKER_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG-py312"
+  paths:
+    - .cache/pip
+    - .venv
+
+default:
+  image: python:3.12-slim
+  before_script:
+    - python -m venv .venv
+    - . .venv/bin/activate
+    - pip install -U pip
+    - pip install -e ".[dev]"
+
+ruff:
+  stage: lint
+  script:
+    - ruff check src tests
+    - ruff format --check src tests
+
+mypy:
+  stage: typecheck
+  script:
+    - mypy src
+
+pytest:
+  stage: test
+  services:
+    - postgres:16-alpine
+    - redis:7-alpine
+  variables:
+    POSTGRES_USER: helpers
+    POSTGRES_PASSWORD: helpers
+    POSTGRES_DB: helpers
+    POSTGRES_HOST: postgres
+    REDIS_URL: redis://redis:6379/0
+    RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+    FERNET_KEYS: wzWS2Aq5tt7Wvgxx58lfX0ChJZCB83OpoIOQOoDNZ14=
+  script:
+    - pytest --cov-report=xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+      junit: junit.xml
+
+build-image:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - docker build -f docker/app.Dockerfile -t "$DOCKER_IMAGE" .
+    - docker tag "$DOCKER_IMAGE" "$CI_REGISTRY_IMAGE:latest"
+    - docker push "$DOCKER_IMAGE"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+  only:
+    - main
+    - tags
+
+deploy-staging:
+  stage: deploy
+  image: alpine:3.20
+  script:
+    - echo "TODO: plug in your orchestrator (kubectl apply / argocd / compose pull)."
+  environment:
+    name: staging
+  when: manual
+  only:
+    - main
+
+deploy-production:
+  stage: deploy
+  image: alpine:3.20
+  script:
+    - echo "TODO: plug in your orchestrator (kubectl apply / argocd / compose pull)."
+  environment:
+    name: production
+  when: manual
+  only:
+    - tags

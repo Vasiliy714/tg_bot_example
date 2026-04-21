@@ -1,0 +1,1 @@
+"""Wildberries Telegram bot service."""

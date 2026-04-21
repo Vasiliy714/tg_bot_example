@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    env: local
+    platform: helpers
+
+scrape_configs:
+  - job_name: admin-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["admin-api:8000"]
+        labels: { service: admin-api }
+
+  - job_name: wb-bot
+    metrics_path: /
+    static_configs:
+      - targets: ["wb-bot:9100"]
+        labels: { service: wb-bot }
+
+  - job_name: ozon-bot
+    metrics_path: /
+    static_configs:
+      - targets: ["ozon-bot:9100"]
+        labels: { service: ozon-bot }
+
+  - job_name: task-bot
+    metrics_path: /
+    static_configs:
+      - targets: ["task-bot:9100"]
+        labels: { service: task-bot }
+
+  - job_name: network-bot
+    metrics_path: /
+    static_configs:
+      - targets: ["network-bot:9100"]
+        labels: { service: network-bot }
